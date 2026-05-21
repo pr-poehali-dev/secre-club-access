@@ -43,20 +43,14 @@ def handler(event: dict, context) -> dict:
         return {"statusCode": 200, "headers": headers, "body": ""}
 
     all_headers = event.get("headers") or {}
-    print("DEBUG headers:", list(all_headers.keys()))
     raw_token = all_headers.get("X-Authorization", "") or all_headers.get("Authorization", "")
     token = raw_token.replace("Bearer ", "").strip()
     method = event.get("httpMethod", "GET")
-    print("DEBUG method:", method, "token_len:", len(token))
 
     conn = get_conn()
     cur = conn.cursor()
 
     try:
-        cur.execute("SELECT current_user, current_schema()")
-        whoami = cur.fetchone()
-        print("DEBUG db user:", whoami)
-
         # GET — пропуска текущего пользователя
         if method == "GET":
             if not token:
@@ -143,8 +137,8 @@ def handler(event: dict, context) -> dict:
                 expires_at = datetime.now(timezone.utc) + delta
 
             cur.execute(
-                "INSERT INTO " + SCHEMA + ".passes (id, user_id, display_name, privilege, no_timer, expires_at, created_by) "
-                "VALUES (nextval('" + SCHEMA + ".passes_id_seq'), %s, %s, %s, %s, %s, %s) RETURNING id",
+                "INSERT INTO " + SCHEMA + ".passes (user_id, display_name, privilege, no_timer, expires_at, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                 (target_user_id, display_name, privilege, no_timer, expires_at, admin_id)
             )
             new_id = cur.fetchone()[0]
