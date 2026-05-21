@@ -337,7 +337,7 @@ function AdminPage({ session }: { session: Session }) {
       const data = await res.json();
       if (!res.ok) setError(data.error || "Ошибка");
       else { setSuccess(`Пропуск выдан! ID #${data.id}`); setUsername(""); setDisplayName(""); }
-    } catch { setError("Нет соединения с сервером"); }
+    } catch (e) { console.error("passes POST error:", e); setError("Нет соединения с сервером"); }
     finally { setLoading(false); }
   };
 
