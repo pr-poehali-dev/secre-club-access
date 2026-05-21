@@ -12,7 +12,7 @@
       "name": "POST create without token - unauthorized",
       "method": "POST",
       "path": "/",
-      "body": {"action": "create", "username": "someone", "display_name": "Test", "role": "client"},
+      "body": {"username": "someone", "display_name": "Test", "privilege": "client"},
       "expectedStatus": 401,
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
