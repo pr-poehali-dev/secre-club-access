@@ -5,11 +5,25 @@ const AUTH_URL = "https://functions.poehali.dev/5ade4d5e-5e9e-4c62-b935-8cce71cb
 const PASSES_URL = "https://functions.poehali.dev/c4369691-fe27-49e8-baa0-97da45e80e03";
 const USERS_URL = "https://functions.poehali.dev/5e3fd207-c5f7-4fd4-a39e-f0e255c1a498";
 const MESSAGES_URL = "https://functions.poehali.dev/7999e2b0-72e2-4884-9941-eae1d93e52f3";
+const PROMO_URL = "https://functions.poehali.dev/62db5ca7-438e-4cdf-bc08-8dee362ae500";
 const STORAGE_KEY = "club_session";
 
 type Tab = "passes" | "profile" | "admin";
 type AuthMode = "login" | "register";
 type Privilege = "client" | "helper" | "admator" | "developer";
+
+interface PromoCode {
+  id: number;
+  code: string;
+  display_name: string;
+  privilege: Privilege;
+  no_timer: boolean;
+  duration_seconds: number | null;
+  max_uses: number | null;
+  uses_count: number;
+  expires_at: string | null;
+  created_at: string;
+}
 type DurationUnit = "minutes" | "hours" | "days";
 
 interface Session {
@@ -228,6 +242,10 @@ function PassesPage({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Pass | null>(null);
 
+  const [promoInput, setPromoInput] = useState("");
+  const [promoActivating, setPromoActivating] = useState(false);
+  const [promoResult, setPromoResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -242,11 +260,32 @@ function PassesPage({ session }: { session: Session }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const activatePromo = async () => {
+    if (!promoInput.trim()) return;
+    setPromoActivating(true); setPromoResult(null);
+    try {
+      const res = await fetch(PROMO_URL, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ code: promoInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPromoResult({ ok: true, msg: `Пропуск «${data.display_name}» активирован!` });
+        setPromoInput("");
+        load();
+      } else {
+        setPromoResult({ ok: false, msg: data.error || "Ошибка" });
+      }
+    } catch { setPromoResult({ ok: false, msg: "Ошибка соединения" }); }
+    finally { setPromoActivating(false); }
+  };
+
   return (
     <div className="page-enter px-4 pt-8 pb-8">
       {selected && <PassModal pass={selected} onClose={() => setSelected(null)} />}
 
-      <div className="px-2 mb-6">
+      <div className="px-2 mb-5">
         <p className="text-xs font-display tracking-[0.2em] uppercase text-muted-foreground mb-1">Приватный клуб</p>
         <h1 className="font-display text-4xl font-bold tracking-wide text-foreground">
           ПРОПУСКА<span className="neon-text">.</span>
@@ -255,6 +294,36 @@ function PassesPage({ session }: { session: Session }) {
           <p className="text-muted-foreground text-sm mt-1">
             {passes.filter(p => p.active).length} активных из {passes.length}
           </p>
+        )}
+      </div>
+
+      {/* Promo code */}
+      <div className="glass-card rounded-2xl p-4 mb-5">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Промокод</p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <Icon name="Ticket" size={15} className="text-muted-foreground" />
+            </div>
+            <input
+              value={promoInput}
+              onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoResult(null); }}
+              onKeyDown={(e) => e.key === "Enter" && activatePromo()}
+              placeholder="ВВЕДИТЕ КОД"
+              className="w-full bg-white/5 rounded-xl pl-9 pr-3 py-2.5 text-sm font-mono tracking-widest text-foreground placeholder:text-muted-foreground/40 outline-none border border-transparent focus:border-neon/30 transition-all"
+            />
+          </div>
+          <button onClick={activatePromo} disabled={promoActivating || !promoInput.trim()}
+            className="neon-btn px-4 rounded-xl text-sm font-display font-semibold tracking-wide flex items-center gap-1.5 disabled:opacity-50">
+            {promoActivating ? <Icon name="Loader2" size={15} className="animate-spin" /> : <Icon name="Zap" size={15} />}
+            OK
+          </button>
+        </div>
+        {promoResult && (
+          <div className={`flex items-center gap-2 mt-2 px-3 py-2 rounded-xl text-sm ${promoResult.ok ? "bg-neon/10 border border-neon/20 text-neon" : "bg-red-500/10 border border-red-500/20 text-red-400"}`}>
+            <Icon name={promoResult.ok ? "CheckCircle" : "AlertCircle"} size={14} className="flex-shrink-0" />
+            {promoResult.msg}
+          </div>
         )}
       </div>
 
@@ -447,6 +516,25 @@ function AdminPage({ session }: { session: Session }) {
   const [msgSuccess, setMsgSuccess] = useState("");
   const [msgError, setMsgError] = useState("");
 
+  // Promo
+  const [promos, setPromos] = useState<PromoCode[]>([]);
+  const [promosLoading, setPromosLoading] = useState(true);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoDisplayName, setPromoDisplayName] = useState("");
+  const [promoPrivilege, setPromoPrivilege] = useState<Privilege>("client");
+  const [promoNoTimer, setPromoNoTimer] = useState(false);
+  const [promoDurationValue, setPromoDurationValue] = useState("24");
+  const [promoDurationUnit, setPromoDurationUnit] = useState<DurationUnit>("hours");
+  const [promoMaxUses, setPromoMaxUses] = useState("1");
+  const [promoUnlimitedUses, setPromoUnlimitedUses] = useState(false);
+  const [promoExpiresValue, setPromoExpiresValue] = useState("7");
+  const [promoExpiresUnit, setPromoExpiresUnit] = useState<DurationUnit>("days");
+  const [promoUnlimitedExpiry, setPromoUnlimitedExpiry] = useState(false);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState("");
+  const [promoSuccess, setPromoSuccess] = useState("");
+  const [deletingPromoId, setDeletingPromoId] = useState<number | null>(null);
+
   const loadPasses = useCallback(async () => {
     setPassesLoading(true);
     try {
@@ -467,7 +555,66 @@ function AdminPage({ session }: { session: Session }) {
     finally { setUsersLoading(false); }
   }, [session.token]);
 
-  useEffect(() => { loadPasses(); loadUsers(); }, [loadPasses, loadUsers]);
+  const loadPromos = useCallback(async () => {
+    setPromosLoading(true);
+    try {
+      const res = await fetch(PROMO_URL, { headers: { "Authorization": `Bearer ${session.token}` } });
+      const data = await res.json();
+      if (res.ok) setPromos(data.promos || []);
+    } catch { /* ignore */ }
+    finally { setPromosLoading(false); }
+  }, [session.token]);
+
+  useEffect(() => { loadPasses(); loadUsers(); loadPromos(); }, [loadPasses, loadUsers, loadPromos]);
+
+  const unitToSeconds = (val: string, unit: DurationUnit) => {
+    const n = parseInt(val) || 1;
+    if (unit === "minutes") return n * 60;
+    if (unit === "hours") return n * 3600;
+    return n * 86400;
+  };
+
+  const createPromo = async () => {
+    setPromoError(""); setPromoSuccess(""); setPromoLoading(true);
+    try {
+      const body: Record<string, unknown> = {
+        code: promoCode.trim().toUpperCase(),
+        display_name: promoDisplayName.trim(),
+        privilege: promoPrivilege,
+        no_timer: promoPrivilege === "developer" || promoNoTimer,
+        max_uses: promoUnlimitedUses ? null : parseInt(promoMaxUses) || 1,
+        promo_expires_seconds: promoUnlimitedExpiry ? null : unitToSeconds(promoExpiresValue, promoExpiresUnit),
+      };
+      if (!promoNoTimer && promoPrivilege !== "developer") {
+        body.duration_seconds = unitToSeconds(promoDurationValue, promoDurationUnit);
+      }
+      const res = await fetch(PROMO_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPromoSuccess("Промокод создан!");
+        setPromoCode(""); setPromoDisplayName("");
+        loadPromos();
+      } else setPromoError(data.error || "Ошибка");
+    } catch { setPromoError("Ошибка соединения"); }
+    finally { setPromoLoading(false); }
+  };
+
+  const deletePromo = async (id: number) => {
+    setDeletingPromoId(id);
+    try {
+      await fetch(PROMO_URL, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      loadPromos();
+    } catch { /* ignore */ }
+    finally { setDeletingPromoId(null); }
+  };
 
   const sendMessage = async () => {
     if (!msgText.trim()) return;
@@ -868,6 +1015,188 @@ function AdminPage({ session }: { session: Session }) {
           {loading ? <Icon name="Loader2" size={17} className="animate-spin" /> : <Icon name="Plus" size={17} />}
           ВЫДАТЬ ПРОПУСК
         </button>
+      </div>
+
+      {/* Create promo */}
+      <div className="glass-card rounded-3xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Icon name="Ticket" size={18} className="text-neon" />
+          <h2 className="font-display font-bold text-foreground tracking-wide">СОЗДАТЬ ПРОМОКОД</h2>
+        </div>
+
+        {/* Code */}
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Промокод</label>
+          <input value={promoCode} onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+            placeholder="MYCODE2025"
+            className="w-full bg-white/5 rounded-2xl px-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-neon/40 transition-all font-mono tracking-widest" />
+        </div>
+
+        {/* Display name */}
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Название пропуска</label>
+          <input value={promoDisplayName} onChange={(e) => setPromoDisplayName(e.target.value)}
+            placeholder="Пропуск по промокоду"
+            className="w-full bg-white/5 rounded-2xl px-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-neon/40 transition-all" />
+        </div>
+
+        {/* Privilege */}
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Привилегия</label>
+          <div className="grid grid-cols-2 gap-2">
+            {([["client","Клиент","text-sky-400"],["helper","Помощник","text-purple-400"],["admator","Администратор","text-orange-400"],["developer","Разработчик","text-yellow-400"]] as [Privilege,string,string][]).map(([v,l,c]) => (
+              <button key={v} onClick={() => setPromoPrivilege(v)}
+                className={`py-2.5 rounded-xl text-sm font-semibold transition-all border ${promoPrivilege === v ? `${c} bg-white/10 border-white/20` : "text-muted-foreground bg-white/5 border-transparent"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Pass duration */}
+        {promoPrivilege !== "developer" && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Срок пропуска</label>
+              <button onClick={() => setPromoNoTimer(v => !v)}
+                className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${promoNoTimer ? "text-neon" : "text-muted-foreground"}`}>
+                <div className={`w-8 h-4 rounded-full relative border transition-colors ${promoNoTimer ? "bg-neon/30 border-neon/50" : "bg-white/10 border-white/10"}`}>
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${promoNoTimer ? "left-4 bg-neon" : "left-0.5 bg-white/40"}`} />
+                </div>
+                Бессрочно
+              </button>
+            </div>
+            {!promoNoTimer && (
+              <div className="flex gap-2">
+                <input type="number" min="1" value={promoDurationValue} onChange={(e) => setPromoDurationValue(e.target.value)}
+                  className="w-24 bg-white/5 rounded-xl px-3 py-2.5 text-foreground text-sm outline-none border border-transparent focus:border-neon/40 transition-all" />
+                <div className="flex gap-1 flex-1">
+                  {(["minutes","hours","days"] as DurationUnit[]).map((u) => (
+                    <button key={u} onClick={() => setPromoDurationUnit(u)}
+                      className={`flex-1 rounded-xl py-2.5 text-xs font-semibold font-display tracking-wide border transition-all ${promoDurationUnit === u ? "text-neon border-neon/40 bg-neon/10" : "text-muted-foreground border-white/10"}`}>
+                      {u === "minutes" ? "МИН" : u === "hours" ? "ЧАС" : "ДН"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Max uses */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Кол-во использований</label>
+            <button onClick={() => setPromoUnlimitedUses(v => !v)}
+              className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${promoUnlimitedUses ? "text-neon" : "text-muted-foreground"}`}>
+              <div className={`w-8 h-4 rounded-full relative border transition-colors ${promoUnlimitedUses ? "bg-neon/30 border-neon/50" : "bg-white/10 border-white/10"}`}>
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${promoUnlimitedUses ? "left-4 bg-neon" : "left-0.5 bg-white/40"}`} />
+              </div>
+              Безлимит
+            </button>
+          </div>
+          {!promoUnlimitedUses && (
+            <input type="number" min="1" value={promoMaxUses} onChange={(e) => setPromoMaxUses(e.target.value)}
+              className="w-full bg-white/5 rounded-xl px-4 py-2.5 text-foreground text-sm outline-none border border-transparent focus:border-neon/40 transition-all" />
+          )}
+        </div>
+
+        {/* Promo validity */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Срок действия промокода</label>
+            <button onClick={() => setPromoUnlimitedExpiry(v => !v)}
+              className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${promoUnlimitedExpiry ? "text-neon" : "text-muted-foreground"}`}>
+              <div className={`w-8 h-4 rounded-full relative border transition-colors ${promoUnlimitedExpiry ? "bg-neon/30 border-neon/50" : "bg-white/10 border-white/10"}`}>
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${promoUnlimitedExpiry ? "left-4 bg-neon" : "left-0.5 bg-white/40"}`} />
+              </div>
+              Бессрочно
+            </button>
+          </div>
+          {!promoUnlimitedExpiry && (
+            <div className="flex gap-2">
+              <input type="number" min="1" value={promoExpiresValue} onChange={(e) => setPromoExpiresValue(e.target.value)}
+                className="w-24 bg-white/5 rounded-xl px-3 py-2.5 text-foreground text-sm outline-none border border-transparent focus:border-neon/40 transition-all" />
+              <div className="flex gap-1 flex-1">
+                {(["minutes","hours","days"] as DurationUnit[]).map((u) => (
+                  <button key={u} onClick={() => setPromoExpiresUnit(u)}
+                    className={`flex-1 rounded-xl py-2.5 text-xs font-semibold font-display tracking-wide border transition-all ${promoExpiresUnit === u ? "text-neon border-neon/40 bg-neon/10" : "text-muted-foreground border-white/10"}`}>
+                    {u === "minutes" ? "МИН" : u === "hours" ? "ЧАС" : "ДН"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {promoError && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+            <Icon name="AlertCircle" size={14} className="text-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-400">{promoError}</p>
+          </div>
+        )}
+        {promoSuccess && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-neon/10 border border-neon/20">
+            <Icon name="CheckCircle" size={14} className="text-neon flex-shrink-0" />
+            <p className="text-sm text-neon">{promoSuccess}</p>
+          </div>
+        )}
+
+        <button onClick={createPromo} disabled={promoLoading || !promoCode.trim() || !promoDisplayName.trim()}
+          className="neon-btn w-full rounded-2xl py-3.5 font-display font-semibold tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {promoLoading ? <Icon name="Loader2" size={17} className="animate-spin" /> : <Icon name="Ticket" size={17} />}
+          СОЗДАТЬ ПРОМОКОД
+        </button>
+      </div>
+
+      {/* Promos list */}
+      <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icon name="Tag" size={17} className="text-neon" />
+            <h2 className="font-display font-bold text-foreground tracking-wide">ПРОМОКОДЫ</h2>
+          </div>
+          <span className="text-xs text-muted-foreground">{promos.length} шт.</span>
+        </div>
+        {promosLoading ? (
+          <div className="flex justify-center py-6"><Icon name="Loader2" size={24} className="text-neon animate-spin" /></div>
+        ) : promos.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Промокодов нет</p>
+        ) : (
+          <div className="space-y-2">
+            {promos.map((p) => (
+              <div key={p.id} className="rounded-2xl p-3.5 bg-white/5 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-sm font-bold text-neon tracking-widest">{p.code}</span>
+                    <span className={`text-[10px] font-display font-bold uppercase tracking-wide ${PRIV_ACCENT[p.privilege]}`}>{p.privilege}</span>
+                  </div>
+                  <p className="text-xs text-foreground mb-1">{p.display_name}</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span className="text-[11px] text-muted-foreground">
+                      {p.max_uses === null ? "∞" : `${p.uses_count}/${p.max_uses}`} исп.
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {p.no_timer ? "пропуск бессрочный" : p.duration_seconds ? `${Math.round(p.duration_seconds / 3600)}ч пропуск` : ""}
+                    </span>
+                    {p.expires_at && (
+                      <span className="text-[11px] text-yellow-400/80">
+                        до {new Date(p.expires_at).toLocaleDateString("ru-RU")}
+                      </span>
+                    )}
+                    {!p.expires_at && <span className="text-[11px] text-muted-foreground">промокод бессрочный</span>}
+                  </div>
+                </div>
+                <button onClick={() => deletePromo(p.id)} disabled={deletingPromoId === p.id}
+                  className="w-8 h-8 rounded-xl bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center transition-colors flex-shrink-0 mt-0.5">
+                  {deletingPromoId === p.id
+                    ? <Icon name="Loader2" size={13} className="text-red-400 animate-spin" />
+                    : <Icon name="Trash2" size={13} className="text-red-400" />}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
