@@ -4,6 +4,7 @@ import Icon from "@/components/ui/icon";
 const AUTH_URL = "https://functions.poehali.dev/5ade4d5e-5e9e-4c62-b935-8cce71cbfc2f";
 const PASSES_URL = "https://functions.poehali.dev/c4369691-fe27-49e8-baa0-97da45e80e03";
 const USERS_URL = "https://functions.poehali.dev/5e3fd207-c5f7-4fd4-a39e-f0e255c1a498";
+const MESSAGES_URL = "https://functions.poehali.dev/7999e2b0-72e2-4884-9941-eae1d93e52f3";
 const STORAGE_KEY = "club_session";
 
 type Tab = "passes" | "profile" | "admin";
@@ -438,6 +439,14 @@ function AdminPage({ session }: { session: Session }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const [msgText, setMsgText] = useState("");
+  const [msgTarget, setMsgTarget] = useState<number | null>(null);
+  const [msgTargetName, setMsgTargetName] = useState("Всем");
+  const [msgUserSearch, setMsgUserSearch] = useState("");
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [msgSuccess, setMsgSuccess] = useState("");
+  const [msgError, setMsgError] = useState("");
+
   const loadPasses = useCallback(async () => {
     setPassesLoading(true);
     try {
@@ -459,6 +468,22 @@ function AdminPage({ session }: { session: Session }) {
   }, [session.token]);
 
   useEffect(() => { loadPasses(); loadUsers(); }, [loadPasses, loadUsers]);
+
+  const sendMessage = async () => {
+    if (!msgText.trim()) return;
+    setMsgLoading(true); setMsgError(""); setMsgSuccess("");
+    try {
+      const res = await fetch(MESSAGES_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: msgText.trim(), target_user_id: msgTarget }),
+      });
+      const data = await res.json();
+      if (res.ok) { setMsgSuccess("Сообщение отправлено!"); setMsgText(""); }
+      else setMsgError(data.error || "Ошибка");
+    } catch { setMsgError("Ошибка соединения"); }
+    finally { setMsgLoading(false); }
+  };
 
   const deletePass = async (pass: Pass) => {
     setDeleting(true);
@@ -541,6 +566,90 @@ function AdminPage({ session }: { session: Session }) {
         <h1 className="font-display text-4xl font-bold tracking-wide text-foreground">
           АДМИН<span className="neon-text">.</span>
         </h1>
+      </div>
+
+      {/* Send system message */}
+      <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Icon name="Send" size={17} className="text-neon" />
+          <h2 className="font-display font-bold text-foreground tracking-wide">СИСТЕМНОЕ СООБЩЕНИЕ</h2>
+        </div>
+
+        {/* Recipient selector */}
+        <div className="mb-3">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Кому</label>
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              onClick={() => { setMsgTarget(null); setMsgTargetName("Всем"); setMsgUserSearch(""); }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${msgTarget === null ? "bg-yellow-400/10 text-yellow-400 border-yellow-400/30" : "text-muted-foreground border-white/10 hover:border-white/20"}`}>
+              Всем
+            </button>
+            {msgTarget !== null && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neon/10 border border-neon/30">
+                <span className="text-xs font-semibold text-neon">{msgTargetName}</span>
+                <button onClick={() => { setMsgTarget(null); setMsgTargetName("Всем"); }} className="text-neon hover:opacity-60 transition-opacity">
+                  <Icon name="X" size={12} />
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <Icon name="Search" size={14} className="text-muted-foreground" />
+            </div>
+            <input
+              value={msgUserSearch}
+              onChange={(e) => setMsgUserSearch(e.target.value)}
+              placeholder="Найти пользователя..."
+              className="w-full bg-white/5 rounded-xl pl-9 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none border border-transparent focus:border-neon/30 transition-all"
+            />
+          </div>
+          {msgUserSearch && (
+            <div className="mt-1 rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+              {users.filter(u => u.username.toLowerCase().includes(msgUserSearch.toLowerCase())).slice(0, 4).map((u) => (
+                <button key={u.id} onClick={() => { setMsgTarget(u.id); setMsgTargetName(u.username); setMsgUserSearch(""); }}
+                  className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-white/5 transition-colors flex items-center gap-2">
+                  <span className="text-xs font-bold text-neon">{u.username.slice(0, 2).toUpperCase()}</span>
+                  {u.username}
+                </button>
+              ))}
+              {users.filter(u => u.username.toLowerCase().includes(msgUserSearch.toLowerCase())).length === 0 && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">Не найдено</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Message text */}
+        <div className="mb-3">
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Текст сообщения</label>
+          <textarea
+            value={msgText}
+            onChange={(e) => setMsgText(e.target.value)}
+            placeholder="Введите текст сообщения..."
+            rows={3}
+            className="w-full bg-white/5 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none border border-transparent focus:border-neon/30 transition-all resize-none"
+          />
+        </div>
+
+        {msgError && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 mb-3">
+            <Icon name="AlertCircle" size={14} className="text-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-400">{msgError}</p>
+          </div>
+        )}
+        {msgSuccess && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-neon/10 border border-neon/20 mb-3">
+            <Icon name="CheckCircle" size={14} className="text-neon flex-shrink-0" />
+            <p className="text-sm text-neon">{msgSuccess}</p>
+          </div>
+        )}
+
+        <button onClick={sendMessage} disabled={msgLoading || !msgText.trim()}
+          className="neon-btn w-full rounded-2xl py-3 font-display font-semibold tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {msgLoading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Send" size={16} />}
+          ОТПРАВИТЬ {msgTarget === null ? "ВСЕМ" : `→ ${msgTargetName}`}
+        </button>
       </div>
 
       {/* Users list */}
@@ -807,6 +916,61 @@ function ProfilePage({ session, onLogout, isAdmin }: { session: Session; onLogou
   );
 }
 
+// ——— Messages Drawer ———
+function MessagesDrawer({ session, open, onClose }: { session: Session; open: boolean; onClose: () => void }) {
+  const [messages, setMessages] = useState<{ id: number; target_user_id: number | null; text: string; created_at: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    fetch(MESSAGES_URL, { headers: { "Authorization": `Bearer ${session.token}` } })
+      .then((r) => r.json())
+      .then((d) => setMessages(d.messages || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [open, session.token]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md mx-4 mb-4 glass-card rounded-3xl p-5 animate-scale-in max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Icon name="MessageSquare" size={17} className="text-neon" />
+            <h3 className="font-display font-bold text-foreground tracking-wide">СООБЩЕНИЯ</h3>
+          </div>
+          <button className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors" onClick={onClose}>
+            <Icon name="X" size={16} className="text-muted-foreground" />
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1 space-y-2 pr-0.5">
+          {loading ? (
+            <div className="flex justify-center py-8"><Icon name="Loader2" size={22} className="text-neon animate-spin" /></div>
+          ) : messages.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Нет сообщений</p>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className="rounded-2xl p-4 bg-white/5 border border-white/5">
+                <div className="flex items-start justify-between gap-3 mb-1.5">
+                  <span className={`text-[10px] font-display font-bold tracking-widest uppercase ${m.target_user_id ? "text-neon" : "text-yellow-400"}`}>
+                    {m.target_user_id ? "Личное" : "Всем"}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                    {new Date(m.created_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground leading-relaxed">{m.text}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ——— Main ———
 const ADMIN_USERS = ["Lavrov1yList"];
 
@@ -814,6 +978,7 @@ export default function Index() {
   const [tab, setTab] = useState<Tab>("passes");
   const { session, save, logout } = useSession();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [msgOpen, setMsgOpen] = useState(false);
 
   useEffect(() => {
     if (session) setIsAdmin(ADMIN_USERS.includes(session.username));
@@ -828,10 +993,24 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-mesh flex flex-col max-w-md mx-auto relative" style={{ minHeight: "100dvh" }}>
+      {/* Messages drawer */}
+      {session && <MessagesDrawer session={session} open={msgOpen} onClose={() => setMsgOpen(false)} />}
+
       {/* Top nav */}
       <div className="sticky top-0 z-20 px-6 pt-12 pb-3"
         style={{ background: "hsla(220,20%,6%,0.85)", backdropFilter: "blur(24px)", borderBottom: "1px solid hsla(220,20%,18%,0.5)" }}>
-        <p className="text-[10px] font-display tracking-[0.25em] uppercase text-muted-foreground mb-3">Приватный клуб</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[10px] font-display tracking-[0.25em] uppercase text-muted-foreground">Приватный клуб</p>
+          {session && (
+            <button
+              onClick={() => setMsgOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neon/15 border border-neon/30 hover:bg-neon/25 transition-all"
+              style={{ boxShadow: "0 0 12px hsla(162,100%,50%,0.15)" }}>
+              <Icon name="MessageSquare" size={14} className="text-neon" />
+              <span className="text-[11px] font-display font-semibold text-neon tracking-wide">Сообщения</span>
+            </button>
+          )}
+        </div>
         <div className="flex gap-1 p-1 rounded-2xl bg-white/5">
           {tabs.map((t) => (
             <button key={t.id}
