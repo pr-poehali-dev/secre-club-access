@@ -934,8 +934,8 @@ function MessagesDrawer({ session, open, onClose }: { session: Session; open: bo
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md mx-4 mb-4 glass-card rounded-3xl p-5 animate-scale-in max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md mx-4 mt-4 glass-card rounded-3xl p-5 animate-scale-in max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             <Icon name="MessageSquare" size={17} className="text-neon" />
