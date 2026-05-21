@@ -53,6 +53,10 @@ def handler(event: dict, context) -> dict:
     cur = conn.cursor()
 
     try:
+        cur.execute("SELECT current_user, current_schema()")
+        whoami = cur.fetchone()
+        print("DEBUG db user:", whoami)
+
         # GET — пропуска текущего пользователя
         if method == "GET":
             if not token:
