@@ -25,6 +25,8 @@ interface Pass {
   expires_at: string | null;
   created_at: string;
   active: boolean;
+  user_id?: number;
+  username?: string;
 }
 
 const PRIV_COLOR: Record<Privilege, string> = {
@@ -304,8 +306,123 @@ function PassesPage({ session }: { session: Session }) {
   );
 }
 
+// ——— Edit Pass Modal ———
+function EditPassModal({
+  pass, session, onClose, onSaved,
+}: { pass: Pass; session: Session; onClose: () => void; onSaved: () => void }) {
+  const [displayName, setDisplayName] = useState(pass.display_name);
+  const [privilege, setPrivilege] = useState<Privilege>(pass.privilege);
+  const [noTimer, setNoTimer] = useState(pass.no_timer);
+  const [durationValue, setDurationValue] = useState("24");
+  const [durationUnit, setDurationUnit] = useState<DurationUnit>("hours");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isDev = privilege === "developer";
+
+  const save = async () => {
+    setError(""); setLoading(true);
+    try {
+      const body: Record<string, unknown> = { id: pass.id, display_name: displayName, privilege, no_timer: isDev || noTimer };
+      if (!isDev && !noTimer) { body.duration_value = parseInt(durationValue) || 24; body.duration_unit = durationUnit; }
+      const res = await fetch(PASSES_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) setError(data.error || "Ошибка");
+      else { onSaved(); onClose(); }
+    } catch { setError("Нет соединения"); }
+    finally { setLoading(false); }
+  };
+
+  const privOptions: { value: Privilege; label: string; color: string }[] = [
+    { value: "client", label: "Клиент", color: "text-sky-400" },
+    { value: "helper", label: "Помощник", color: "text-purple-400" },
+    { value: "admator", label: "Администратор", color: "text-orange-400" },
+    { value: "developer", label: "Разработчик", color: "text-yellow-400" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md mx-4 mb-4 glass-card rounded-3xl p-5 space-y-4 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-display font-bold text-foreground tracking-wide">РЕДАКТИРОВАТЬ ПРОПУСК</h3>
+          <button className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors" onClick={onClose}>
+            <Icon name="X" size={16} className="text-muted-foreground" />
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">#{pass.id} · {pass.username}</p>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Название пропуска</label>
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)}
+            className="w-full glass-card rounded-2xl px-4 py-3 text-foreground text-sm outline-none bg-transparent" />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Привилегия</label>
+          <div className="grid grid-cols-2 gap-2">
+            {privOptions.map((o) => (
+              <button key={o.value} onClick={() => setPrivilege(o.value)}
+                className={`py-2.5 rounded-xl text-sm font-semibold transition-all ${privilege === o.value ? `${o.color} bg-white/10 border border-white/20` : "text-muted-foreground bg-white/5"}`}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!isDev && (
+          <div className="flex items-center justify-between px-1">
+            <span className="text-sm text-muted-foreground">Бессрочно</span>
+            <button onClick={() => setNoTimer((v) => !v)}
+              className={`w-11 h-6 rounded-full transition-colors relative ${noTimer ? "bg-neon" : "bg-white/10"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${noTimer ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
+        )}
+
+        {!isDev && !noTimer && (
+          <div className="flex gap-2">
+            <input type="number" min="1" value={durationValue} onChange={(e) => setDurationValue(e.target.value)}
+              className="w-24 glass-card rounded-xl px-3 py-2 text-foreground text-sm outline-none bg-transparent" />
+            <div className="flex gap-1 flex-1">
+              {(["minutes", "hours", "days"] as DurationUnit[]).map((u) => (
+                <button key={u} onClick={() => setDurationUnit(u)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all ${durationUnit === u ? "bg-neon/20 text-neon border border-neon/30" : "bg-white/5 text-muted-foreground"}`}>
+                  {u === "minutes" ? "мин" : u === "hours" ? "ч" : "д"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+            <Icon name="AlertCircle" size={15} className="text-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+        )}
+
+        <button onClick={save} disabled={loading || !displayName}
+          className="neon-btn w-full rounded-2xl py-3 font-display font-semibold tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+          {loading ? <Icon name="Loader2" size={16} className="animate-spin" /> : <Icon name="Save" size={16} />}
+          СОХРАНИТЬ
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ——— Admin Panel ———
 function AdminPage({ session }: { session: Session }) {
+  const [allPasses, setAllPasses] = useState<Pass[]>([]);
+  const [passesLoading, setPassesLoading] = useState(true);
+  const [editPass, setEditPass] = useState<Pass | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Pass | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [privilege, setPrivilege] = useState<Privilege>("client");
@@ -315,6 +432,31 @@ function AdminPage({ session }: { session: Session }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const loadPasses = useCallback(async () => {
+    setPassesLoading(true);
+    try {
+      const res = await fetch(PASSES_URL, { headers: { "Authorization": `Bearer ${session.token}` } });
+      const data = await res.json();
+      if (res.ok) setAllPasses(data.passes || []);
+    } catch { /* ignore */ }
+    finally { setPassesLoading(false); }
+  }, [session.token]);
+
+  useEffect(() => { loadPasses(); }, [loadPasses]);
+
+  const deletePass = async (pass: Pass) => {
+    setDeleting(true);
+    try {
+      const res = await fetch(PASSES_URL, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.token}` },
+        body: JSON.stringify({ id: pass.id }),
+      });
+      if (res.ok) { setDeleteConfirm(null); loadPasses(); }
+    } catch { /* ignore */ }
+    finally { setDeleting(false); }
+  };
 
   const isDev = privilege === "developer";
 
@@ -336,7 +478,7 @@ function AdminPage({ session }: { session: Session }) {
       });
       const data = await res.json();
       if (!res.ok) setError(data.error || "Ошибка");
-      else { setSuccess(`Пропуск выдан! ID #${data.id}`); setUsername(""); setDisplayName(""); }
+      else { setSuccess(`Пропуск выдан! ID #${data.id}`); setUsername(""); setDisplayName(""); loadPasses(); }
     } catch (e) { console.error("passes POST error:", e); setError("Нет соединения с сервером"); }
     finally { setLoading(false); }
   };
@@ -356,11 +498,75 @@ function AdminPage({ session }: { session: Session }) {
 
   return (
     <div className="page-enter px-6 pt-8 pb-8">
+      {editPass && <EditPassModal pass={editPass} session={session} onClose={() => setEditPass(null)} onSaved={loadPasses} />}
+
+      {/* Delete confirm */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-6" onClick={() => setDeleteConfirm(null)}>
+          <div className="w-full max-w-sm glass-card rounded-3xl p-6 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mb-4">
+              <Icon name="Trash2" size={22} className="text-red-400" />
+            </div>
+            <h3 className="font-display font-bold text-foreground mb-1">Удалить пропуск?</h3>
+            <p className="text-sm text-muted-foreground mb-5">«{deleteConfirm.display_name}» у пользователя <span className="text-foreground font-semibold">{deleteConfirm.username}</span></p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-3 rounded-2xl bg-white/5 text-muted-foreground text-sm font-semibold hover:bg-white/10 transition-colors">Отмена</button>
+              <button onClick={() => deletePass(deleteConfirm)} disabled={deleting}
+                className="flex-1 py-3 rounded-2xl bg-red-500/20 border border-red-500/30 text-red-400 text-sm font-semibold hover:bg-red-500/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-50">
+                {deleting ? <Icon name="Loader2" size={15} className="animate-spin" /> : <Icon name="Trash2" size={15} />}
+                Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6">
         <p className="text-xs font-display tracking-[0.2em] uppercase text-muted-foreground mb-1">Управление</p>
         <h1 className="font-display text-4xl font-bold tracking-wide text-foreground">
           АДМИН<span className="neon-text">.</span>
         </h1>
+      </div>
+
+      {/* All passes list */}
+      <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Icon name="List" size={17} className="text-neon" />
+            <h2 className="font-display font-bold text-foreground tracking-wide">ВСЕ ПРОПУСКА</h2>
+          </div>
+          <span className="text-xs text-muted-foreground">{allPasses.length} шт.</span>
+        </div>
+        {passesLoading ? (
+          <div className="flex justify-center py-6"><Icon name="Loader2" size={24} className="text-neon animate-spin" /></div>
+        ) : allPasses.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Пропусков нет</p>
+        ) : (
+          <div className="space-y-2">
+            {allPasses.map((p) => (
+              <div key={p.id} className={`rounded-2xl p-3.5 bg-gradient-to-br ${PRIV_COLOR[p.privilege]} flex items-center gap-3`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className={`text-[10px] font-display font-bold tracking-widest uppercase ${PRIV_ACCENT[p.privilege]}`}>{p.privilege_label}</span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${p.active ? "badge-active" : "badge-inactive"}`}>{p.active ? "Активен" : "Истёк"}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground truncate">{p.display_name}</p>
+                  <p className="text-xs text-muted-foreground">@{p.username} · {formatExpiry(p.expires_at, p.no_timer, p.privilege)}</p>
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button onClick={() => setEditPass(p)}
+                    className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                    <Icon name="Pencil" size={14} className="text-muted-foreground" />
+                  </button>
+                  <button onClick={() => setDeleteConfirm(p)}
+                    className="w-8 h-8 rounded-xl bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center transition-colors">
+                    <Icon name="Trash2" size={14} className="text-red-400" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Create Pass Card */}

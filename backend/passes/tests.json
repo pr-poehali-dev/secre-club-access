@@ -17,5 +17,24 @@
       "expectedBody": {"error": "string"},
       "bodyMatcher": "partial"
     }
+  ,
+    {
+      "name": "PUT update without token - unauthorized",
+      "method": "PUT",
+      "path": "/",
+      "body": {"id": 1, "display_name": "Test", "privilege": "client"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "DELETE without token - unauthorized",
+      "method": "DELETE",
+      "path": "/",
+      "body": {"id": 1},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
   ]
 }
