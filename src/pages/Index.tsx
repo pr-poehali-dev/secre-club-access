@@ -3,6 +3,7 @@ import Icon from "@/components/ui/icon";
 
 const AUTH_URL = "https://functions.poehali.dev/5ade4d5e-5e9e-4c62-b935-8cce71cbfc2f";
 const PASSES_URL = "https://functions.poehali.dev/c4369691-fe27-49e8-baa0-97da45e80e03";
+const USERS_URL = "https://functions.poehali.dev/5e3fd207-c5f7-4fd4-a39e-f0e255c1a498";
 const STORAGE_KEY = "club_session";
 
 type Tab = "passes" | "profile" | "admin";
@@ -423,6 +424,9 @@ function AdminPage({ session }: { session: Session }) {
   const [editPass, setEditPass] = useState<Pass | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Pass | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [users, setUsers] = useState<{ id: number; username: string; created_at: string; passes_count: number }[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [userSearch, setUserSearch] = useState("");
 
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -444,7 +448,17 @@ function AdminPage({ session }: { session: Session }) {
     finally { setPassesLoading(false); }
   }, [session.token]);
 
-  useEffect(() => { loadPasses(); }, [loadPasses]);
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true);
+    try {
+      const res = await fetch(USERS_URL, { headers: { "Authorization": `Bearer ${session.token}` } });
+      const data = await res.json();
+      if (res.ok) setUsers(data.users || []);
+    } catch { /* ignore */ }
+    finally { setUsersLoading(false); }
+  }, [session.token]);
+
+  useEffect(() => { loadPasses(); loadUsers(); }, [loadPasses, loadUsers]);
 
   const deletePass = async (pass: Pass) => {
     setDeleting(true);
@@ -529,8 +543,61 @@ function AdminPage({ session }: { session: Session }) {
         </h1>
       </div>
 
-      {/* All passes list */}
+      {/* Users list */}
       <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Icon name="Users" size={17} className="text-neon" />
+            <h2 className="font-display font-bold text-foreground tracking-wide">ПОЛЬЗОВАТЕЛИ</h2>
+          </div>
+          <span className="text-xs text-muted-foreground">{users.length} чел.</span>
+        </div>
+        <div className="relative mb-3">
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <Icon name="Search" size={15} className="text-muted-foreground" />
+          </div>
+          <input
+            value={userSearch}
+            onChange={(e) => setUserSearch(e.target.value)}
+            placeholder="Поиск по username..."
+            className="w-full bg-white/5 rounded-xl pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none border border-transparent focus:border-neon/30 transition-all"
+          />
+          {userSearch && (
+            <button onClick={() => setUserSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+              <Icon name="X" size={14} />
+            </button>
+          )}
+        </div>
+        {usersLoading ? (
+          <div className="flex justify-center py-6"><Icon name="Loader2" size={24} className="text-neon animate-spin" /></div>
+        ) : users.filter(u => !userSearch || u.username.toLowerCase().includes(userSearch.toLowerCase())).length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Никого не найдено</p>
+        ) : (
+          <div className="space-y-2">
+            {users.filter(u => !userSearch || u.username.toLowerCase().includes(userSearch.toLowerCase())).map((u) => (
+              <div key={u.id} className="rounded-2xl p-3.5 bg-white/5 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-neon/10 border border-neon/20 flex items-center justify-center flex-shrink-0">
+                  <span className="font-display text-sm font-bold text-neon">{u.username.slice(0, 2).toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{u.username}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(u.created_at).toLocaleDateString("ru-RU")} · {u.passes_count} {u.passes_count === 1 ? "пропуск" : u.passes_count < 5 ? "пропуска" : "пропусков"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setSearch(u.username); document.getElementById("passes-block")?.scrollIntoView({ behavior: "smooth" }); }}
+                  className="text-xs text-neon font-semibold hover:opacity-70 transition-opacity flex-shrink-0">
+                  Пропуска
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* All passes list */}
+      <div id="passes-block" className="glass-card rounded-3xl p-5 mb-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Icon name="List" size={17} className="text-neon" />
