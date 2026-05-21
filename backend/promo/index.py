@@ -159,9 +159,9 @@ def handler(event: dict, context) -> dict:
                 expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
 
             cur.execute(
-                "INSERT INTO " + SCHEMA + ".passes (user_id, display_name, privilege, no_timer, expires_at) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (user_id, display_name, privilege, no_timer, expires_at)
+                "INSERT INTO " + SCHEMA + ".passes (user_id, display_name, privilege, no_timer, expires_at, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (user_id, display_name, privilege, no_timer, expires_at, user_id)
             )
             pass_id = cur.fetchone()[0]
             cur.execute("UPDATE " + SCHEMA + ".promo_codes SET uses_count = uses_count + 1 WHERE id = %s", (pid,))
