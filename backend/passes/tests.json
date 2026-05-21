@@ -1,0 +1,21 @@
+{
+  "tests": [
+    {
+      "name": "GET without token - unauthorized",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST create without token - unauthorized",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "create", "username": "someone", "display_name": "Test", "role": "client"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
