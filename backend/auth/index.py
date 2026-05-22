@@ -1,4 +1,4 @@
-"""Регистрация и вход по username + пароль."""
+"""Регистрация и вход по username + пароль. При логине проверяет бан."""
 import json
 import os
 import hashlib
@@ -67,6 +67,11 @@ def handler(event: dict, context) -> dict:
             if not row:
                 return {"statusCode": 401, "headers": headers, "body": json.dumps({"error": "Неверный логин или пароль"})}
             user_id = row[0]
+
+            # Проверка бана
+            cur.execute("SELECT 1 FROM " + SCHEMA + ".bans WHERE user_id = %s", (user_id,))
+            if cur.fetchone():
+                return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "BANNED", "banned": True})}
 
         else:
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Неизвестное действие"})}

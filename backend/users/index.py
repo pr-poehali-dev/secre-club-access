@@ -1,4 +1,4 @@
-"""Список пользователей и управление правами администратора (только для суперадминов)."""
+"""Список пользователей, управление правами администратора и банами."""
 import json
 import os
 import psycopg2
@@ -27,6 +27,10 @@ def get_caller(cur, token):
     is_superadmin = admin_row[0] if admin_row else False
     return user_id, is_admin, is_superadmin
 
+def is_banned(cur, user_id):
+    cur.execute("SELECT 1 FROM " + SCHEMA + ".bans WHERE user_id = %s", (user_id,))
+    return cur.fetchone() is not None
+
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": HEADERS, "body": ""}
@@ -45,26 +49,31 @@ def handler(event: dict, context) -> dict:
         user_id, is_admin, is_superadmin = get_caller(cur, token)
         if user_id is None:
             return {"statusCode": 401, "headers": HEADERS, "body": json.dumps({"error": "Сессия недействительна"})}
+
+        if is_banned(cur, user_id):
+            return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "BANNED", "banned": True})}
+
         if not is_admin:
             return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Нет прав администратора"})}
 
         method = event.get("httpMethod", "GET")
 
-        # GET — список пользователей
         if method == "GET":
             cur.execute(
                 "SELECT u.id, u.username, u.created_at, "
                 "(SELECT COUNT(*) FROM " + SCHEMA + ".passes p WHERE p.user_id = u.id) AS passes_count, "
                 "a.user_id IS NOT NULL AS is_admin, "
-                "COALESCE(a.is_superadmin, false) AS is_superadmin "
+                "COALESCE(a.is_superadmin, false) AS is_superadmin, "
+                "b.user_id IS NOT NULL AS is_banned "
                 "FROM " + SCHEMA + ".users u "
                 "LEFT JOIN " + SCHEMA + ".admins a ON a.user_id = u.id "
+                "LEFT JOIN " + SCHEMA + ".bans b ON b.user_id = u.id "
                 "ORDER BY u.created_at DESC"
             )
             rows = cur.fetchall()
             users = []
             for r in rows:
-                uid, username, created_at, passes_count, u_is_admin, u_is_superadmin = r
+                uid, username, created_at, passes_count, u_is_admin, u_is_superadmin, u_is_banned = r
                 if created_at and created_at.tzinfo is None:
                     from datetime import timezone
                     created_at = created_at.replace(tzinfo=timezone.utc)
@@ -75,41 +84,57 @@ def handler(event: dict, context) -> dict:
                     "passes_count": passes_count,
                     "is_admin": bool(u_is_admin),
                     "is_superadmin": bool(u_is_superadmin),
+                    "is_banned": bool(u_is_banned),
                 })
-            return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"users": users, "caller_is_superadmin": is_superadmin})}
+            return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({
+                "users": users,
+                "caller_is_superadmin": is_superadmin
+            })}
 
-        # POST — выдать/забрать права админа (только суперадмин)
         if method == "POST":
-            if not is_superadmin:
-                return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Только суперадмин может управлять правами"})}
-
             body = json.loads(event.get("body") or "{}")
             target_user_id = body.get("user_id")
-            action = body.get("action")  # "grant" | "revoke"
+            action = body.get("action")
 
-            if not target_user_id or action not in ("grant", "revoke"):
-                return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Укажите user_id и action (grant/revoke)"})}
+            if not target_user_id or action not in ("grant", "revoke", "ban", "unban"):
+                return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Укажите user_id и action"})}
 
             if target_user_id == user_id:
                 return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Нельзя менять свои права"})}
 
-            # Проверяем что цель — не суперадмин
             cur.execute("SELECT is_superadmin FROM " + SCHEMA + ".admins WHERE user_id = %s", (target_user_id,))
-            target_row = cur.fetchone()
-            if target_row and target_row[0]:
-                return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Нельзя изменить права суперадмина"})}
+            target_admin_row = cur.fetchone()
+            target_is_superadmin = target_admin_row[0] if target_admin_row else False
 
-            if action == "grant":
-                cur.execute(
-                    "INSERT INTO " + SCHEMA + ".admins (user_id, is_superadmin) VALUES (%s, false) "
-                    "ON CONFLICT (user_id) DO NOTHING",
-                    (target_user_id,)
-                )
-            else:
-                cur.execute(
-                    "DELETE FROM " + SCHEMA + ".admins WHERE user_id = %s AND is_superadmin = false",
-                    (target_user_id,)
-                )
+            if action in ("grant", "revoke"):
+                if not is_superadmin:
+                    return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Только суперадмин может управлять правами"})}
+                if target_is_superadmin:
+                    return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Нельзя изменить права суперадмина"})}
+                if action == "grant":
+                    cur.execute(
+                        "INSERT INTO " + SCHEMA + ".admins (user_id, is_superadmin) VALUES (%s, false) ON CONFLICT (user_id) DO NOTHING",
+                        (target_user_id,)
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM " + SCHEMA + ".admins WHERE user_id = %s AND is_superadmin = false",
+                        (target_user_id,)
+                    )
+
+            elif action in ("ban", "unban"):
+                if target_is_superadmin:
+                    return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Нельзя забанить суперадмина"})}
+                if not is_superadmin and target_admin_row is not None:
+                    return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "Нельзя забанить администратора"})}
+                if action == "ban":
+                    cur.execute(
+                        "INSERT INTO " + SCHEMA + ".bans (user_id, banned_by) VALUES (%s, %s) ON CONFLICT (user_id) DO NOTHING",
+                        (target_user_id, user_id)
+                    )
+                    cur.execute("DELETE FROM " + SCHEMA + ".sessions WHERE user_id = %s", (target_user_id,))
+                else:
+                    cur.execute("DELETE FROM " + SCHEMA + ".bans WHERE user_id = %s", (target_user_id,))
 
             conn.commit()
             return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"ok": True})}

@@ -494,10 +494,12 @@ function AdminPage({ session, isSuperAdmin }: { session: Session; isSuperAdmin: 
   const [editPass, setEditPass] = useState<Pass | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Pass | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [users, setUsers] = useState<{ id: number; username: string; created_at: string; passes_count: number; is_admin: boolean; is_superadmin: boolean }[]>([]);
+  const [users, setUsers] = useState<{ id: number; username: string; created_at: string; passes_count: number; is_admin: boolean; is_superadmin: boolean; is_banned: boolean }[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [userSearch, setUserSearch] = useState("");
   const [adminActionLoading, setAdminActionLoading] = useState<number | null>(null);
+  const [banActionLoading, setBanActionLoading] = useState<number | null>(null);
+  const [banSearch, setBanSearch] = useState("");
 
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -555,6 +557,19 @@ function AdminPage({ session, isSuperAdmin }: { session: Session; isSuperAdmin: 
     } catch { /* ignore */ }
     finally { setUsersLoading(false); }
   }, [session.token]);
+
+  const toggleBan = async (userId: number, currentIsBanned: boolean) => {
+    setBanActionLoading(userId);
+    try {
+      await fetch(USERS_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, action: currentIsBanned ? "unban" : "ban" }),
+      });
+      loadUsers();
+    } catch { /* ignore */ }
+    finally { setBanActionLoading(null); }
+  };
 
   const toggleAdmin = async (userId: number, currentIsAdmin: boolean) => {
     setAdminActionLoading(userId);
@@ -877,6 +892,66 @@ function AdminPage({ session, isSuperAdmin }: { session: Session; isSuperAdmin: 
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Ban management */}
+      <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Icon name="ShieldOff" size={17} className="text-red-400" />
+          <h2 className="font-display font-bold text-foreground tracking-wide">БАНЫ</h2>
+        </div>
+        <div className="relative mb-3">
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <Icon name="Search" size={14} className="text-muted-foreground" />
+          </div>
+          <input
+            value={banSearch}
+            onChange={(e) => setBanSearch(e.target.value)}
+            placeholder="Поиск по username..."
+            className="w-full bg-white/5 rounded-xl pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none border border-transparent focus:border-red-400/30 transition-all"
+          />
+          {banSearch && (
+            <button onClick={() => setBanSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+              <Icon name="X" size={14} />
+            </button>
+          )}
+        </div>
+        {usersLoading ? (
+          <div className="flex justify-center py-6"><Icon name="Loader2" size={24} className="text-neon animate-spin" /></div>
+        ) : (
+          <div className="space-y-2">
+            {users
+              .filter(u => !u.is_superadmin && u.id !== session.user_id)
+              .filter(u => !banSearch || u.username.toLowerCase().includes(banSearch.toLowerCase()))
+              .map((u) => (
+                <div key={u.id} className={`rounded-2xl p-3.5 flex items-center gap-3 ${u.is_banned ? "bg-red-500/10 border border-red-500/20" : "bg-white/5"}`}>
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${u.is_banned ? "bg-red-500/20 border border-red-500/30" : "bg-white/5 border border-white/10"}`}>
+                    <span className={`font-display text-sm font-bold ${u.is_banned ? "text-red-400" : "text-muted-foreground"}`}>{u.username.slice(0, 2).toUpperCase()}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-semibold text-foreground truncate">{u.username}</p>
+                      {u.is_banned && <span className="text-[9px] font-display font-bold tracking-widest uppercase text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">ЗАБАНЕН</span>}
+                      {u.is_admin && !u.is_banned && <span className="text-[9px] font-display font-bold tracking-widest uppercase text-orange-400 bg-orange-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">АДМИН</span>}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{new Date(u.created_at).toLocaleDateString("ru-RU")}</p>
+                  </div>
+                  {(!u.is_admin || isSuperAdmin) && (
+                    <button
+                      onClick={() => toggleBan(u.id, u.is_banned)}
+                      disabled={banActionLoading === u.id}
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 flex-shrink-0 ${u.is_banned ? "bg-neon/15 text-neon hover:bg-neon/25" : "bg-red-500/15 text-red-400 hover:bg-red-500/25"}`}>
+                      {banActionLoading === u.id ? <Icon name="Loader2" size={11} className="animate-spin" /> : <Icon name={u.is_banned ? "ShieldCheck" : "Ban"} size={11} />}
+                      {u.is_banned ? "Разбанить" : "Забанить"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            {users.filter(u => !u.is_superadmin && u.id !== session.user_id && (!banSearch || u.username.toLowerCase().includes(banSearch.toLowerCase()))).length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">Никого не найдено</p>
+            )}
           </div>
         )}
       </div>
@@ -1329,26 +1404,55 @@ function MessagesDrawer({ session, open, onClose }: { session: Session; open: bo
   );
 }
 
+// ——— Ban Screen ———
+function BannedScreen({ onLogout }: { onLogout: () => void }) {
+  return (
+    <div className="min-h-screen bg-mesh flex flex-col items-center justify-center px-6 text-center" style={{ minHeight: "100dvh" }}>
+      <div className="w-20 h-20 rounded-3xl bg-red-500/15 border border-red-500/30 flex items-center justify-center mb-6">
+        <Icon name="ShieldOff" size={36} className="text-red-400" />
+      </div>
+      <h1 className="font-display text-3xl font-bold text-foreground mb-2">ДОСТУП ЗАКРЫТ<span className="text-red-400">.</span></h1>
+      <p className="text-sm text-muted-foreground mb-8 max-w-xs">Ваш аккаунт заблокирован администрацией клуба. Обратитесь к администратору для разблокировки.</p>
+      <button onClick={onLogout} className="flex items-center gap-2 px-5 py-3 rounded-2xl border border-red-500/20 text-red-400/80 hover:border-red-500/40 hover:text-red-400 transition-all text-sm font-semibold">
+        <Icon name="LogOut" size={15} />
+        Выйти из аккаунта
+      </button>
+    </div>
+  );
+}
+
 // ——— Main ———
 export default function Index() {
   const [tab, setTab] = useState<Tab>("passes");
   const { session, save, logout } = useSession();
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isBanned, setIsBanned] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
 
-  useEffect(() => {
-    if (!session) { setIsAdmin(false); setIsSuperAdmin(false); return; }
-    fetch(USERS_URL, { headers: { "Authorization": `Bearer ${session.token}` } })
+  const checkSession = (token: string, userId: number) => {
+    fetch(PASSES_URL, { headers: { "Authorization": `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (d.banned) setIsBanned(true); })
+      .catch(() => {});
+    fetch(USERS_URL, { headers: { "Authorization": `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
+        if (d.banned) { setIsBanned(true); return; }
         if (d.users) {
-          const me = d.users.find((u: { id: number; is_admin: boolean; is_superadmin: boolean }) => u.id === session.user_id);
+          const me = d.users.find((u: { id: number; is_admin: boolean; is_superadmin: boolean }) => u.id === userId);
           setIsAdmin(!!me?.is_admin);
           setIsSuperAdmin(!!d.caller_is_superadmin);
         }
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!session) { setIsAdmin(false); setIsSuperAdmin(false); setIsBanned(false); return; }
+    checkSession(session.token, session.user_id);
+    const interval = setInterval(() => checkSession(session.token, session.user_id), 15000);
+    return () => clearInterval(interval);
   }, [session]);
 
   const tabs = [
@@ -1356,6 +1460,8 @@ export default function Index() {
     ...(isAdmin ? [{ id: "admin" as Tab, icon: "ShieldCheck", label: "АДМИН" }] : []),
     { id: "profile" as Tab, icon: "User", label: "ПРОФИЛЬ" },
   ];
+
+  if (session && isBanned) return <BannedScreen onLogout={logout} />;
 
   return (
     <div className="min-h-screen bg-mesh flex flex-col max-w-md mx-auto relative" style={{ minHeight: "100dvh" }}>

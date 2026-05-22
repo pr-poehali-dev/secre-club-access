@@ -31,6 +31,10 @@ def is_admin(cur, user_id):
     )
     return cur.fetchone() is not None
 
+def is_banned(cur, user_id):
+    cur.execute("SELECT 1 FROM " + SCHEMA + ".bans WHERE user_id = %s", (user_id,))
+    return cur.fetchone() is not None
+
 def handler(event: dict, context) -> dict:
     headers = {
         "Access-Control-Allow-Origin": "*",
@@ -59,6 +63,9 @@ def handler(event: dict, context) -> dict:
             user_id = get_user_id_by_token(cur, token)
             if not user_id:
                 return {"statusCode": 401, "headers": headers, "body": json.dumps({"error": "Сессия недействительна"})}
+
+            if is_banned(cur, user_id):
+                return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "BANNED", "banned": True})}
 
             admin = is_admin(cur, user_id)
 
@@ -111,6 +118,9 @@ def handler(event: dict, context) -> dict:
             admin_id = get_user_id_by_token(cur, token)
             if not admin_id:
                 return {"statusCode": 401, "headers": headers, "body": json.dumps({"error": "Сессия недействительна"})}
+
+            if is_banned(cur, admin_id):
+                return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "BANNED", "banned": True})}
 
             if not is_admin(cur, admin_id):
                 return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "Нет прав администратора"})}
@@ -172,6 +182,9 @@ def handler(event: dict, context) -> dict:
             if not admin_id:
                 return {"statusCode": 401, "headers": headers, "body": json.dumps({"error": "Сессия недействительна"})}
 
+            if is_banned(cur, admin_id):
+                return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "BANNED", "banned": True})}
+
             if not is_admin(cur, admin_id):
                 return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "Нет прав администратора"})}
 
@@ -220,6 +233,9 @@ def handler(event: dict, context) -> dict:
             admin_id = get_user_id_by_token(cur, token)
             if not admin_id:
                 return {"statusCode": 401, "headers": headers, "body": json.dumps({"error": "Сессия недействительна"})}
+
+            if is_banned(cur, admin_id):
+                return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "BANNED", "banned": True})}
 
             if not is_admin(cur, admin_id):
                 return {"statusCode": 403, "headers": headers, "body": json.dumps({"error": "Нет прав администратора"})}

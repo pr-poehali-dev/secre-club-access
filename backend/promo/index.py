@@ -25,6 +25,10 @@ def is_admin(cur, user_id):
     cur.execute("SELECT 1 FROM " + SCHEMA + ".admins WHERE user_id = %s", (user_id,))
     return cur.fetchone() is not None
 
+def is_banned(cur, user_id):
+    cur.execute("SELECT 1 FROM " + SCHEMA + ".bans WHERE user_id = %s", (user_id,))
+    return cur.fetchone() is not None
+
 def serialize_promo(r):
     pid, code, display_name, privilege, no_timer, duration_seconds, max_uses, uses_count, expires_at, created_at = r
     if created_at and created_at.tzinfo is None:
@@ -62,6 +66,9 @@ def handler(event: dict, context) -> dict:
         user_id = get_user(cur, token)
         if not user_id:
             return {"statusCode": 401, "headers": HEADERS, "body": json.dumps({"error": "Сессия недействительна"})}
+
+        if is_banned(cur, user_id):
+            return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "BANNED", "banned": True})}
 
         method = event.get("httpMethod", "GET")
 
@@ -154,6 +161,14 @@ def handler(event: dict, context) -> dict:
             if max_uses is not None and uses_count >= max_uses:
                 return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Лимит использований исчерпан"})}
 
+            # Проверка: этот пользователь уже активировал данный промокод
+            cur.execute(
+                "SELECT 1 FROM " + SCHEMA + ".promo_uses WHERE promo_id = %s AND user_id = %s",
+                (pid, user_id)
+            )
+            if cur.fetchone():
+                return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Вы уже активировали этот промокод"})}
+
             expires_at = None
             if not no_timer and duration_seconds:
                 expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
@@ -164,6 +179,10 @@ def handler(event: dict, context) -> dict:
                 (user_id, display_name, privilege, no_timer, expires_at, user_id)
             )
             pass_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO " + SCHEMA + ".promo_uses (promo_id, user_id) VALUES (%s, %s)",
+                (pid, user_id)
+            )
             cur.execute("UPDATE " + SCHEMA + ".promo_codes SET uses_count = uses_count + 1 WHERE id = %s", (pid,))
             conn.commit()
             return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"ok": True, "pass_id": pass_id, "display_name": display_name, "privilege": privilege})}

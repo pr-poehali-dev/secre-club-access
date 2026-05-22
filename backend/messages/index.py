@@ -26,6 +26,10 @@ def is_admin(cur, user_id):
     cur.execute("SELECT 1 FROM " + SCHEMA + ".admins WHERE user_id = %s", (user_id,))
     return cur.fetchone() is not None
 
+def is_banned(cur, user_id):
+    cur.execute("SELECT 1 FROM " + SCHEMA + ".bans WHERE user_id = %s", (user_id,))
+    return cur.fetchone() is not None
+
 def handler(event: dict, context) -> dict:
     if event.get("httpMethod") == "OPTIONS":
         return {"statusCode": 200, "headers": HEADERS, "body": ""}
@@ -44,6 +48,9 @@ def handler(event: dict, context) -> dict:
         user_id = get_user(cur, token)
         if not user_id:
             return {"statusCode": 401, "headers": HEADERS, "body": json.dumps({"error": "Сессия недействительна"})}
+
+        if is_banned(cur, user_id):
+            return {"statusCode": 403, "headers": HEADERS, "body": json.dumps({"error": "BANNED", "banned": True})}
 
         method = event.get("httpMethod", "GET")
 
