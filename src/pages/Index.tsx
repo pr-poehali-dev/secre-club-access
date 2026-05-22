@@ -487,16 +487,17 @@ function EditPassModal({
 }
 
 // ——— Admin Panel ———
-function AdminPage({ session }: { session: Session }) {
+function AdminPage({ session, isSuperAdmin }: { session: Session; isSuperAdmin: boolean }) {
   const [allPasses, setAllPasses] = useState<Pass[]>([]);
   const [passesLoading, setPassesLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editPass, setEditPass] = useState<Pass | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Pass | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [users, setUsers] = useState<{ id: number; username: string; created_at: string; passes_count: number }[]>([]);
+  const [users, setUsers] = useState<{ id: number; username: string; created_at: string; passes_count: number; is_admin: boolean; is_superadmin: boolean }[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [userSearch, setUserSearch] = useState("");
+  const [adminActionLoading, setAdminActionLoading] = useState<number | null>(null);
 
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -554,6 +555,19 @@ function AdminPage({ session }: { session: Session }) {
     } catch { /* ignore */ }
     finally { setUsersLoading(false); }
   }, [session.token]);
+
+  const toggleAdmin = async (userId: number, currentIsAdmin: boolean) => {
+    setAdminActionLoading(userId);
+    try {
+      await fetch(USERS_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, action: currentIsAdmin ? "revoke" : "grant" }),
+      });
+      loadUsers();
+    } catch { /* ignore */ }
+    finally { setAdminActionLoading(null); }
+  };
 
   const loadPromos = useCallback(async () => {
     setPromosLoading(true);
@@ -831,21 +845,36 @@ function AdminPage({ session }: { session: Session }) {
         ) : (
           <div className="space-y-2">
             {users.filter(u => !userSearch || u.username.toLowerCase().includes(userSearch.toLowerCase())).map((u) => (
-              <div key={u.id} className="rounded-2xl p-3.5 bg-white/5 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-neon/10 border border-neon/20 flex items-center justify-center flex-shrink-0">
-                  <span className="font-display text-sm font-bold text-neon">{u.username.slice(0, 2).toUpperCase()}</span>
+              <div key={u.id} className={`rounded-2xl p-3.5 flex items-center gap-3 ${u.is_superadmin ? "bg-yellow-500/10 border border-yellow-500/20" : u.is_admin ? "bg-orange-500/10 border border-orange-500/20" : "bg-white/5"}`}>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${u.is_superadmin ? "bg-yellow-500/20 border border-yellow-500/30" : u.is_admin ? "bg-orange-500/20 border border-orange-500/30" : "bg-neon/10 border border-neon/20"}`}>
+                  <span className={`font-display text-sm font-bold ${u.is_superadmin ? "text-yellow-400" : u.is_admin ? "text-orange-400" : "text-neon"}`}>{u.username.slice(0, 2).toUpperCase()}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">{u.username}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm font-semibold text-foreground truncate">{u.username}</p>
+                    {u.is_superadmin && <span className="text-[9px] font-display font-bold tracking-widest uppercase text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">СУПЕРАДМИН</span>}
+                    {!u.is_superadmin && u.is_admin && <span className="text-[9px] font-display font-bold tracking-widest uppercase text-orange-400 bg-orange-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">АДМИН</span>}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {new Date(u.created_at).toLocaleDateString("ru-RU")} · {u.passes_count} {u.passes_count === 1 ? "пропуск" : u.passes_count < 5 ? "пропуска" : "пропусков"}
                   </p>
                 </div>
-                <button
-                  onClick={() => { setSearch(u.username); document.getElementById("passes-block")?.scrollIntoView({ behavior: "smooth" }); }}
-                  className="text-xs text-neon font-semibold hover:opacity-70 transition-opacity flex-shrink-0">
-                  Пропуска
-                </button>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {isSuperAdmin && !u.is_superadmin && u.id !== session.user_id && (
+                    <button
+                      onClick={() => toggleAdmin(u.id, u.is_admin)}
+                      disabled={adminActionLoading === u.id}
+                      className={`text-xs font-semibold px-2.5 py-1.5 rounded-xl transition-all flex items-center gap-1 ${u.is_admin ? "bg-red-500/15 text-red-400 hover:bg-red-500/25" : "bg-orange-500/15 text-orange-400 hover:bg-orange-500/25"}`}>
+                      {adminActionLoading === u.id ? <Icon name="Loader2" size={11} className="animate-spin" /> : <Icon name={u.is_admin ? "ShieldOff" : "ShieldCheck"} size={11} />}
+                      {u.is_admin ? "Забрать" : "Дать"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setSearch(u.username); document.getElementById("passes-block")?.scrollIntoView({ behavior: "smooth" }); }}
+                    className="text-xs text-neon font-semibold hover:opacity-70 transition-opacity">
+                    Пропуска
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1301,17 +1330,25 @@ function MessagesDrawer({ session, open, onClose }: { session: Session; open: bo
 }
 
 // ——— Main ———
-const ADMIN_USERS = ["Lavrov1yList"];
-
 export default function Index() {
   const [tab, setTab] = useState<Tab>("passes");
   const { session, save, logout } = useSession();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
 
   useEffect(() => {
-    if (session) setIsAdmin(ADMIN_USERS.includes(session.username));
-    else setIsAdmin(false);
+    if (!session) { setIsAdmin(false); setIsSuperAdmin(false); return; }
+    fetch(USERS_URL, { headers: { "Authorization": `Bearer ${session.token}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.users) {
+          const me = d.users.find((u: { id: number; is_admin: boolean; is_superadmin: boolean }) => u.id === session.user_id);
+          setIsAdmin(!!me?.is_admin);
+          setIsSuperAdmin(!!d.caller_is_superadmin);
+        }
+      })
+      .catch(() => {});
   }, [session]);
 
   const tabs = [
@@ -1362,7 +1399,7 @@ export default function Index() {
         ) : tab === "passes" ? (
           <PassesPage session={session} />
         ) : tab === "admin" && isAdmin ? (
-          <AdminPage session={session} />
+          <AdminPage session={session} isSuperAdmin={isSuperAdmin} />
         ) : (
           <ProfilePage session={session} onLogout={logout} isAdmin={isAdmin} />
         )}
