@@ -121,14 +121,11 @@ def handler(event: dict, context) -> dict:
             promo_id = body.get("id")
             if not promo_id:
                 return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "id обязателен"})}
-            cur.execute("UPDATE " + SCHEMA + ".promo_codes SET code = code WHERE id = %s", (promo_id,))
             cur.execute("SELECT id FROM " + SCHEMA + ".promo_codes WHERE id = %s", (promo_id,))
             if not cur.fetchone():
                 return {"statusCode": 404, "headers": HEADERS, "body": json.dumps({"error": "Промокод не найден"})}
-            # Mark as deleted by renaming code to prevent reuse
-            cur.execute("UPDATE " + SCHEMA + ".promo_codes SET max_uses = 0, uses_count = 0 WHERE id = %s", (promo_id,))
-            # Actually delete
-            cur.execute("UPDATE " + SCHEMA + ".promo_codes SET code = '__DELETED_' || id::text WHERE id = %s", (promo_id,))
+            cur.execute("DELETE FROM " + SCHEMA + ".promo_uses WHERE promo_id = %s", (promo_id,))
+            cur.execute("DELETE FROM " + SCHEMA + ".promo_codes WHERE id = %s", (promo_id,))
             conn.commit()
             return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"ok": True})}
 

@@ -207,7 +207,8 @@ def handler(event: dict, context) -> dict:
                 if not item_id:
                     return {"statusCode": 400, "headers": HEADERS, "body": json.dumps({"error": "Укажите id"})}
 
-                cur.execute("UPDATE " + SCHEMA + ".shop_items SET active = false WHERE id = %s", (item_id,))
+                cur.execute("DELETE FROM " + SCHEMA + ".shop_purchases WHERE item_id = %s", (item_id,))
+                cur.execute("DELETE FROM " + SCHEMA + ".shop_items WHERE id = %s", (item_id,))
                 conn.commit()
                 return {"statusCode": 200, "headers": HEADERS, "body": json.dumps({"ok": True})}
 
