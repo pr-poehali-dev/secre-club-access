@@ -6,7 +6,9 @@ const PASSES_URL = "https://functions.poehali.dev/c4369691-fe27-49e8-baa0-97da45
 const USERS_URL = "https://functions.poehali.dev/5e3fd207-c5f7-4fd4-a39e-f0e255c1a498";
 const MESSAGES_URL = "https://functions.poehali.dev/7999e2b0-72e2-4884-9941-eae1d93e52f3";
 const PROMO_URL = "https://functions.poehali.dev/62db5ca7-438e-4cdf-bc08-8dee362ae500";
+const SHOP_URL = "https://functions.poehali.dev/7999e2b0-72e2-4884-9941-eae1d93e52f3?type=shop";
 const STORAGE_KEY = "club_session";
+const CURRENCY = "Шоколадные Орешки";
 
 type Tab = "passes" | "profile" | "admin";
 type AuthMode = "login" | "register";
@@ -43,6 +45,18 @@ interface Pass {
   active: boolean;
   user_id?: number;
   username?: string;
+}
+
+interface ShopItem {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  privilege: Privilege;
+  privilege_label: string;
+  no_timer: boolean;
+  duration_seconds: number | null;
+  active: boolean;
 }
 
 const PRIV_COLOR: Record<Privilege, string> = {
@@ -1302,6 +1316,366 @@ function AdminPage({ session, isSuperAdmin }: { session: Session; isSuperAdmin: 
           </div>
         )}
       </div>
+
+      {/* Shop items management */}
+      <ShopAdminBlock session={session} />
+
+      {/* Coins management */}
+      <CoinsAdminBlock session={session} users={users} />
+    </div>
+  );
+}
+
+// ——— Shop Admin Block ———
+function ShopAdminBlock({ session }: { session: Session }) {
+  const [items, setItems] = useState<ShopItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editItem, setEditItem] = useState<ShopItem | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  // Form state
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState("");
+  const [privilege, setPrivilege] = useState<Privilege>("client");
+  const [noTimer, setNoTimer] = useState(false);
+  const [durationValue, setDurationValue] = useState("24");
+  const [durationUnit, setDurationUnit] = useState<DurationUnit>("hours");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const unitToSeconds = (val: string, unit: DurationUnit) => {
+    const n = parseInt(val) || 1;
+    if (unit === "minutes") return n * 60;
+    if (unit === "hours") return n * 3600;
+    return n * 86400;
+  };
+
+  const loadItems = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(SHOP_URL, { headers: { "Authorization": `Bearer ${session.token}` } });
+      const d = await res.json();
+      if (res.ok) setItems(d.items || []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [session.token]);
+
+  useEffect(() => { loadItems(); }, [loadItems]);
+
+  const openEdit = (item: ShopItem) => {
+    setEditItem(item);
+    setName(item.name);
+    setDescription(item.description);
+    setPrice(String(item.price));
+    setPrivilege(item.privilege);
+    setNoTimer(item.no_timer);
+    if (item.duration_seconds) {
+      if (item.duration_seconds % 86400 === 0) { setDurationValue(String(item.duration_seconds / 86400)); setDurationUnit("days"); }
+      else if (item.duration_seconds % 3600 === 0) { setDurationValue(String(item.duration_seconds / 3600)); setDurationUnit("hours"); }
+      else { setDurationValue(String(Math.floor(item.duration_seconds / 60))); setDurationUnit("minutes"); }
+    }
+    setFormError("");
+  };
+
+  const clearForm = () => {
+    setEditItem(null); setName(""); setDescription(""); setPrice(""); setPrivilege("client");
+    setNoTimer(false); setDurationValue("24"); setDurationUnit("hours"); setFormError("");
+  };
+
+  const isDev = privilege === "developer";
+
+  const save = async () => {
+    setFormError(""); setSaving(true);
+    try {
+      const body: Record<string, unknown> = {
+        name, description, price: parseInt(price), privilege,
+        no_timer: isDev || noTimer,
+        duration_seconds: isDev || noTimer ? null : unitToSeconds(durationValue, durationUnit),
+      };
+      if (editItem) body.id = editItem.id;
+      const res = await fetch(SHOP_URL, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      if (res.ok) { clearForm(); loadItems(); }
+      else setFormError(d.error || "Ошибка");
+    } catch { setFormError("Нет соединения"); }
+    finally { setSaving(false); }
+  };
+
+  const deleteItem = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await fetch(SHOP_URL, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      loadItems();
+    } catch { /* ignore */ }
+    finally { setDeletingId(null); }
+  };
+
+  const privOptions: { value: Privilege; label: string; color: string }[] = [
+    { value: "client", label: "Клиент", color: "text-sky-400" },
+    { value: "helper", label: "Помощник", color: "text-purple-400" },
+    { value: "admator", label: "Администратор", color: "text-orange-400" },
+    { value: "developer", label: "Разработчик", color: "text-yellow-400" },
+  ];
+
+  return (
+    <>
+      {/* Create / edit item */}
+      <div className="glass-card rounded-3xl p-5 space-y-4 mb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🍪</span>
+            <h2 className="font-display font-bold text-foreground tracking-wide">{editItem ? "РЕДАКТИРОВАТЬ ТОВАР" : "СОЗДАТЬ ТОВАР"}</h2>
+          </div>
+          {editItem && (
+            <button onClick={clearForm} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+              <Icon name="X" size={13} /> Отмена
+            </button>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Название товара</label>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Пропуск VIP"
+            className="w-full bg-white/5 rounded-xl px-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-amber-400/40 transition-all" />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Описание (необязательно)</label>
+          <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Краткое описание..."
+            className="w-full bg-white/5 rounded-xl px-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-amber-400/40 transition-all" />
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Цена ({CURRENCY})</label>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base pointer-events-none">🍪</span>
+            <input type="number" min="1" value={price} onChange={e => setPrice(e.target.value)} placeholder="100"
+              className="w-full bg-white/5 rounded-xl pl-10 pr-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-amber-400/40 transition-all" />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">Привилегия</label>
+          <div className="grid grid-cols-2 gap-2">
+            {privOptions.map(o => (
+              <button key={o.value} onClick={() => setPrivilege(o.value)}
+                className={`py-2.5 rounded-xl text-sm font-semibold transition-all border ${privilege === o.value ? `${o.color} bg-white/10 border-white/20` : "text-muted-foreground bg-white/5 border-transparent"}`}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!isDev && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Время действия</label>
+              <button onClick={() => setNoTimer(v => !v)}
+                className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${noTimer ? "text-neon" : "text-muted-foreground"}`}>
+                <div className={`w-8 h-4 rounded-full relative border transition-colors ${noTimer ? "bg-neon/30 border-neon/50" : "bg-white/10"}`}>
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full transition-all ${noTimer ? "left-4 bg-neon" : "left-0.5 bg-white/40"}`} />
+                </div>
+                Бессрочно
+              </button>
+            </div>
+            {!noTimer && (
+              <div className="flex gap-2">
+                <input type="number" min="1" value={durationValue} onChange={e => setDurationValue(e.target.value)}
+                  className="w-24 bg-white/5 rounded-xl px-3 py-2.5 text-foreground text-sm outline-none border border-transparent focus:border-amber-400/40 transition-all" />
+                <div className="flex gap-1 flex-1">
+                  {(["minutes","hours","days"] as DurationUnit[]).map(u => (
+                    <button key={u} onClick={() => setDurationUnit(u)}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-semibold border transition-all ${durationUnit === u ? "text-amber-300 border-amber-400/40 bg-amber-500/10" : "text-muted-foreground border-white/10"}`}>
+                      {u === "minutes" ? "МИН" : u === "hours" ? "ЧАС" : "ДН"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {formError && (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+            <Icon name="AlertCircle" size={14} className="text-red-400" />
+            <p className="text-sm text-red-400">{formError}</p>
+          </div>
+        )}
+
+        <button onClick={save} disabled={saving || !name.trim() || !price}
+          className="w-full py-3.5 rounded-2xl font-display font-semibold tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50 bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all">
+          {saving ? <Icon name="Loader2" size={17} className="animate-spin" /> : <span>🍪</span>}
+          {editItem ? "СОХРАНИТЬ ТОВАР" : "СОЗДАТЬ ТОВАР"}
+        </button>
+      </div>
+
+      {/* Items list */}
+      <div className="glass-card rounded-3xl p-5 mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🛒</span>
+            <h2 className="font-display font-bold text-foreground tracking-wide">ТОВАРЫ В МАГАЗИНЕ</h2>
+          </div>
+          <span className="text-xs text-muted-foreground">{items.filter(i => i.active).length} шт.</span>
+        </div>
+        {loading ? (
+          <div className="flex justify-center py-6"><Icon name="Loader2" size={24} className="text-amber-400 animate-spin" /></div>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Товаров нет</p>
+        ) : (
+          <div className="space-y-2">
+            {items.map(item => (
+              <div key={item.id} className={`rounded-2xl p-3.5 flex items-center gap-3 ${item.active ? "bg-white/5" : "bg-white/2 opacity-50"}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <p className="text-sm font-semibold text-foreground truncate">{item.name}</p>
+                    {!item.active && <span className="text-[9px] font-bold text-red-400 bg-red-400/10 px-1.5 py-0.5 rounded-md flex-shrink-0">УДАЛЁН</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs">🍪</span>
+                    <span className="text-xs font-bold text-amber-300">{item.price}</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${PRIV_ACCENT[item.privilege]}`}>{item.privilege_label}</span>
+                  </div>
+                </div>
+                {item.active && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={() => openEdit(item)}
+                      className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors">
+                      <Icon name="Pencil" size={14} className="text-muted-foreground" />
+                    </button>
+                    <button onClick={() => deleteItem(item.id)} disabled={deletingId === item.id}
+                      className="w-8 h-8 rounded-xl bg-red-500/10 hover:bg-red-500/20 flex items-center justify-center transition-colors">
+                      {deletingId === item.id ? <Icon name="Loader2" size={13} className="text-red-400 animate-spin" /> : <Icon name="Trash2" size={13} className="text-red-400" />}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ——— Coins Admin Block ———
+function CoinsAdminBlock({ session, users }: { session: Session; users: { id: number; username: string }[] }) {
+  const [coinUsername, setCoinUsername] = useState("");
+  const [coinAmount, setCoinAmount] = useState("");
+  const [coinAction, setCoinAction] = useState<"give" | "take">("give");
+  const [coinLoading, setCoinLoading] = useState(false);
+  const [coinError, setCoinError] = useState("");
+  const [coinSuccess, setCoinSuccess] = useState("");
+  const [coinUserSearch, setCoinUserSearch] = useState("");
+
+  const submitCoins = async () => {
+    setCoinError(""); setCoinSuccess(""); setCoinLoading(true);
+    try {
+      const res = await fetch(SHOP_URL, {
+        method: "PATCH",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ username: coinUsername, amount: parseInt(coinAmount), action: coinAction }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setCoinSuccess(`${coinAction === "give" ? "Выдано" : "Забрано"} ${coinAmount} ${CURRENCY}. Баланс ${d.username}: ${d.new_balance}`);
+        setCoinAmount(""); setCoinUsername("");
+      } else setCoinError(d.error || "Ошибка");
+    } catch { setCoinError("Нет соединения"); }
+    finally { setCoinLoading(false); }
+  };
+
+  return (
+    <div className="glass-card rounded-3xl p-5 space-y-4 mb-4">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">🍫</span>
+        <h2 className="font-display font-bold text-foreground tracking-wide">ВЫДАТЬ / ЗАБРАТЬ ОРЕШКИ</h2>
+      </div>
+
+      {/* Username */}
+      <div>
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Пользователь</label>
+        <div className="relative">
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <Icon name="Search" size={14} className="text-muted-foreground" />
+          </div>
+          <input value={coinUserSearch} onChange={e => { setCoinUserSearch(e.target.value); if (!e.target.value) setCoinUsername(""); }}
+            placeholder="Найти..."
+            className="w-full bg-white/5 rounded-xl pl-9 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none border border-transparent focus:border-amber-400/30 transition-all" />
+        </div>
+        {coinUsername && (
+          <div className="mt-1 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+            <span className="text-xs font-bold text-amber-300">{coinUsername}</span>
+            <button onClick={() => { setCoinUsername(""); setCoinUserSearch(""); }} className="text-amber-400 hover:opacity-60 transition-opacity ml-auto">
+              <Icon name="X" size={12} />
+            </button>
+          </div>
+        )}
+        {coinUserSearch && !coinUsername && (
+          <div className="mt-1 rounded-xl bg-white/5 border border-white/10 overflow-hidden">
+            {users.filter(u => u.username.toLowerCase().includes(coinUserSearch.toLowerCase())).slice(0, 5).map(u => (
+              <button key={u.id} onClick={() => { setCoinUsername(u.username); setCoinUserSearch(""); }}
+                className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-white/5 transition-colors flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-300">{u.username.slice(0, 2).toUpperCase()}</span>
+                {u.username}
+              </button>
+            ))}
+            {users.filter(u => u.username.toLowerCase().includes(coinUserSearch.toLowerCase())).length === 0 && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">Не найдено</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Amount */}
+      <div>
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Количество орешков</label>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base pointer-events-none">🍪</span>
+          <input type="number" min="1" value={coinAmount} onChange={e => setCoinAmount(e.target.value)} placeholder="100"
+            className="w-full bg-white/5 rounded-xl pl-10 pr-4 py-3 text-foreground text-sm outline-none border border-transparent focus:border-amber-400/40 transition-all" />
+        </div>
+      </div>
+
+      {/* Action */}
+      <div className="flex gap-2">
+        <button onClick={() => setCoinAction("give")}
+          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border ${coinAction === "give" ? "text-neon border-neon/40 bg-neon/10" : "text-muted-foreground border-white/10"}`}>
+          Выдать
+        </button>
+        <button onClick={() => setCoinAction("take")}
+          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border ${coinAction === "take" ? "text-red-400 border-red-400/40 bg-red-400/10" : "text-muted-foreground border-white/10"}`}>
+          Забрать
+        </button>
+      </div>
+
+      {coinError && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20">
+          <Icon name="AlertCircle" size={14} className="text-red-400" />
+          <p className="text-sm text-red-400">{coinError}</p>
+        </div>
+      )}
+      {coinSuccess && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20">
+          <span className="text-sm">🍪</span>
+          <p className="text-sm text-amber-300">{coinSuccess}</p>
+        </div>
+      )}
+
+      <button onClick={submitCoins} disabled={coinLoading || !coinUsername || !coinAmount}
+        className="w-full py-3.5 rounded-2xl font-display font-semibold tracking-wider text-sm flex items-center justify-center gap-2 disabled:opacity-50 bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all">
+        {coinLoading ? <Icon name="Loader2" size={17} className="animate-spin" /> : <span>🍪</span>}
+        {coinAction === "give" ? "ВЫДАТЬ ОРЕШКИ" : "ЗАБРАТЬ ОРЕШКИ"}
+      </button>
     </div>
   );
 }
@@ -1421,6 +1795,128 @@ function BannedScreen({ onLogout }: { onLogout: () => void }) {
   );
 }
 
+// ——— Shop Drawer ———
+function ShopDrawer({ session, open, onClose }: { session: Session; open: boolean; onClose: () => void }) {
+  const [items, setItems] = useState<ShopItem[]>([]);
+  const [balance, setBalance] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [buying, setBuying] = useState<number | null>(null);
+  const [buyMsg, setBuyMsg] = useState<{ id: number; ok: boolean; text: string } | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    fetch(SHOP_URL, { headers: { "Authorization": `Bearer ${session.token}` } })
+      .then(r => r.json())
+      .then(d => { setItems(d.items || []); setBalance(d.balance ?? 0); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { if (open) load(); }, [open]);
+
+  const buy = async (item: ShopItem) => {
+    setBuying(item.id); setBuyMsg(null);
+    try {
+      const res = await fetch(SHOP_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${session.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ item_id: item.id }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setBalance(d.new_balance);
+        setBuyMsg({ id: item.id, ok: true, text: `Куплено! Пропуск добавлен.` });
+      } else {
+        setBuyMsg({ id: item.id, ok: false, text: d.error || "Ошибка" });
+      }
+    } catch { setBuyMsg({ id: item.id, ok: false, text: "Нет соединения" }); }
+    finally { setBuying(null); }
+  };
+
+  const fmtDuration = (item: ShopItem) => {
+    if (item.privilege === "developer" || item.no_timer) return "Бессрочно";
+    if (!item.duration_seconds) return "Нет срока";
+    const s = item.duration_seconds;
+    if (s >= 86400) return `${Math.floor(s / 86400)}д`;
+    if (s >= 3600) return `${Math.floor(s / 3600)}ч`;
+    return `${Math.floor(s / 60)}м`;
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-md mx-4 mt-4 glass-card rounded-3xl overflow-hidden animate-scale-in max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header с балансом */}
+        <div className="px-5 pt-5 pb-4 border-b border-white/8 flex-shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🍫</span>
+              <h3 className="font-display font-bold text-foreground tracking-wide">МАГАЗИН</h3>
+            </div>
+            <button className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors" onClick={onClose}>
+              <Icon name="X" size={16} className="text-muted-foreground" />
+            </button>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+            <span className="text-2xl">🍪</span>
+            <div>
+              <p className="text-xs text-amber-400/70 font-semibold uppercase tracking-wider">{CURRENCY}</p>
+              <p className="font-display text-2xl font-bold text-amber-300">{balance.toLocaleString("ru-RU")}</p>
+            </div>
+          </div>
+        </div>
+        {/* Список товаров */}
+        <div className="overflow-y-auto flex-1 p-4 space-y-3">
+          {loading ? (
+            <div className="flex justify-center py-10"><Icon name="Loader2" size={24} className="text-neon animate-spin" /></div>
+          ) : items.length === 0 ? (
+            <div className="text-center py-10">
+              <span className="text-4xl block mb-3">🛒</span>
+              <p className="text-sm text-muted-foreground">Товаров пока нет</p>
+            </div>
+          ) : (
+            items.map(item => (
+              <div key={item.id} className={`rounded-2xl p-4 bg-gradient-to-br ${PRIV_COLOR[item.privilege]} flex flex-col gap-3`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-[10px] font-display font-bold tracking-widest uppercase ${PRIV_ACCENT[item.privilege]}`}>{item.privilege_label}</span>
+                    <h4 className="font-display font-bold text-foreground text-base leading-tight mt-0.5">{item.name}</h4>
+                    {item.description && <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.description}</p>}
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <div className="flex items-center gap-1 justify-end">
+                      <span className="text-sm">🍪</span>
+                      <span className="font-display font-bold text-amber-300 text-lg">{item.price}</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">{fmtDuration(item)}</p>
+                  </div>
+                </div>
+                {buyMsg?.id === item.id && (
+                  <div className={`text-xs px-3 py-2 rounded-xl ${buyMsg.ok ? "bg-neon/10 text-neon" : "bg-red-500/10 text-red-400"}`}>
+                    {buyMsg.text}
+                  </div>
+                )}
+                <button
+                  onClick={() => buy(item)}
+                  disabled={buying === item.id || balance < item.price}
+                  className={`w-full py-2.5 rounded-xl font-display font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
+                    balance >= item.price
+                      ? "bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30"
+                      : "bg-white/5 text-muted-foreground cursor-not-allowed"
+                  }`}>
+                  {buying === item.id ? <Icon name="Loader2" size={14} className="animate-spin" /> : <span>🍪</span>}
+                  {balance >= item.price ? `Купить за ${item.price}` : `Не хватает ${item.price - balance}`}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ——— Main ———
 export default function Index() {
   const [tab, setTab] = useState<Tab>("passes");
@@ -1429,6 +1925,7 @@ export default function Index() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isBanned, setIsBanned] = useState(false);
   const [msgOpen, setMsgOpen] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
 
   const checkSession = (token: string, userId: number) => {
     fetch(PASSES_URL, { headers: { "Authorization": `Bearer ${token}` } })
@@ -1465,8 +1962,9 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-mesh flex flex-col max-w-md mx-auto relative" style={{ minHeight: "100dvh" }}>
-      {/* Messages drawer */}
+      {/* Drawers */}
       {session && <MessagesDrawer session={session} open={msgOpen} onClose={() => setMsgOpen(false)} />}
+      {session && <ShopDrawer session={session} open={shopOpen} onClose={() => setShopOpen(false)} />}
 
       {/* Top nav */}
       <div className="sticky top-0 z-20 px-6 pt-12 pb-3"
@@ -1474,13 +1972,21 @@ export default function Index() {
         <div className="flex items-center justify-between mb-3">
           <p className="text-[10px] font-display tracking-[0.25em] uppercase text-muted-foreground">Приватный клуб</p>
           {session && (
-            <button
-              onClick={() => setMsgOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neon/15 border border-neon/30 hover:bg-neon/25 transition-all"
-              style={{ boxShadow: "0 0 12px hsla(162,100%,50%,0.15)" }}>
-              <Icon name="MessageSquare" size={14} className="text-neon" />
-              <span className="text-[11px] font-display font-semibold text-neon tracking-wide">Сообщения</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShopOpen(true)}
+                className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 transition-all flex items-center justify-center"
+                style={{ boxShadow: "0 0 10px hsla(38,100%,50%,0.15)" }}>
+                <span className="text-base leading-none">🍪</span>
+              </button>
+              <button
+                onClick={() => setMsgOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neon/15 border border-neon/30 hover:bg-neon/25 transition-all"
+                style={{ boxShadow: "0 0 12px hsla(162,100%,50%,0.15)" }}>
+                <Icon name="MessageSquare" size={14} className="text-neon" />
+                <span className="text-[11px] font-display font-semibold text-neon tracking-wide">Сообщения</span>
+              </button>
+            </div>
           )}
         </div>
         <div className="flex gap-1 p-1 rounded-2xl bg-white/5">
